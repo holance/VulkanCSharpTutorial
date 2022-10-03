@@ -17,13 +17,15 @@ using Silk.NET.Vulkan.Extensions.EXT;
 using Silk.NET.Vulkan.Extensions.KHR;
 using Silk.NET.Windowing;
 using Image = Silk.NET.Vulkan.Image;
+using Vortice.Dxc;
+using System.Text;
 
 namespace VulkanCSharpTutorial
 {
     public class HelloTriangleApplication
     {
         public const bool EnableValidationLayers = true;
-        public const int MaxFramesInFlight = 8;
+        public const int MaxFramesInFlight = 3;
         public const bool EventBasedRendering = false;
 
         public void Run()
@@ -893,6 +895,15 @@ namespace VulkanCSharpTutorial
                     throw new Exception("failed to create render pass!");
                 }
             }
+        }
+
+        unsafe string GetString(byte* ptr)
+        {
+            int length = 0;
+            while (length < 4096 && ptr[length] != 0)
+                length++;
+            // Decode UTF-8 bytes to string.
+            return Encoding.UTF8.GetString(ptr, length);
         }
 
         private unsafe void CreateGraphicsPipeline()
