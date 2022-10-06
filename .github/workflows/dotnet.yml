@@ -1,0 +1,28 @@
+name: .NET
+
+on:
+  push:
+    branches: [ "main" ]
+    paths: 
+      - 'VulkanCSharpTutorial/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ "main" ]
+    paths: 
+      - 'VulkanCSharpTutorial/**'
+      - '.github/workflows/**'
+      
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup .NET Core
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 3.1.101
+
+    - name: Build with dotnet
+      run: dotnet build 'VulkanCSharpTutorial\VulkanCSharpTutorial.sln' --configuration Release
