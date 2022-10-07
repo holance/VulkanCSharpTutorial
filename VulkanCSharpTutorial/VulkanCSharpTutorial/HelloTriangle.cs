@@ -63,10 +63,14 @@ namespace VulkanCSharpTutorial
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     unsafe struct GlobalVar
     {
-        public Matrix4x4 world;
         public Matrix4x4 view;
         public Matrix4x4 projection;
         public Matrix4x4 viewProj;
+    }
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    unsafe struct ModelVar
+    {
+        public Matrix4x4 world;
     }
 
     public class HelloTriangleApplication
@@ -140,8 +144,13 @@ namespace VulkanCSharpTutorial
         private string[] _deviceExtensions = { KhrSwapchain.ExtensionName };
 
 
-        static Vertex[] _vertices = new Vertex[3] { new Vertex(new Vector3(1, 1, 0), new Vector4(1, 0, 0, 1)),
-            new Vertex(new Vector3(-1, 1, 0)), new Vertex(new Vector3(0, -1, 0)) };
+        static Vertex[] _vertices = new Vertex[] { 
+            new Vertex(new Vector3(1, 1, 0), new Vector4(1, 0, 0, 1)),
+            new Vertex(new Vector3(-1, 1, 0)), 
+            new Vertex(new Vector3(0, -1, 0)), 
+            new Vertex(new Vector3(-1, 1, 0)),
+            new Vertex(new Vector3(1, 1, 0), new Vector4(1, 0, 0, 1)),
+        };
         static Buffer _vertexBufferStaging;
         static DeviceMemory _vertexMemStaging;
         static Buffer _vertexBuffer;
@@ -239,6 +248,7 @@ namespace VulkanCSharpTutorial
             PipelineStageFlags[] waitStages = { PipelineStageFlags.ColorAttachmentOutputBit };
             submitInfo.WaitSemaphoreCount = 1;
             var signalSemaphore = _renderFinishedSemaphores[_currentFrame];
+            RecordCommands(_currentFrame);
             fixed (Semaphore* waitSemaphoresPtr = waitSemaphores)
             {
                 fixed (PipelineStageFlags* waitStagesPtr = waitStages)
@@ -294,7 +304,6 @@ namespace VulkanCSharpTutorial
         unsafe void UpdateUniformBuffer(uint currentImage)
         {
             var globalVar = new GlobalVar();
-            globalVar.world = Matrix4x4.CreateScale(currentImage);
             globalVar.view = Matrix4x4.Identity;
             globalVar.projection = Matrix4x4.Identity;
             globalVar.viewProj = Matrix4x4.Identity;
@@ -1124,6 +1133,16 @@ namespace VulkanCSharpTutorial
             colorBlending.BlendConstants[1] = 0.0f;
             colorBlending.BlendConstants[2] = 0.0f;
             colorBlending.BlendConstants[3] = 0.0f;
+
+            var push_constant = new PushConstantRange
+            {
+                Offset = 0,
+                Size = (uint)sizeof(ModelVar),
+                StageFlags = ShaderStageFlags.VertexBit
+            };
+
+
+
             fixed(DescriptorSetLayout* pDescLayout = &_descriptorSetLayout)
             {
                 var pipelineLayoutInfo = new PipelineLayoutCreateInfo
@@ -1131,7 +1150,8 @@ namespace VulkanCSharpTutorial
                     SType = StructureType.PipelineLayoutCreateInfo,
                     SetLayoutCount = 1, 
                     PSetLayouts = pDescLayout,
-                    PushConstantRangeCount = 0
+                    PushConstantRangeCount = 1, 
+                    PPushConstantRanges = &push_constant
                 };
 
                 fixed (PipelineLayout* pipelineLayout = &_pipelineLayout)
@@ -1398,7 +1418,7 @@ namespace VulkanCSharpTutorial
             var poolInfo = new CommandPoolCreateInfo
             {
                 SType = StructureType.CommandPoolCreateInfo,
-                QueueFamilyIndex = queueFamilyIndices.GraphicsFamily.Value
+                QueueFamilyIndex = queueFamilyIndices.GraphicsFamily.Value, Flags = CommandPoolCreateFlags.ResetCommandBufferBit
             };
 
             fixed (CommandPool* commandPool = &_commandPool)
@@ -1430,45 +1450,89 @@ namespace VulkanCSharpTutorial
                 }
             }
 
-            for (var i = 0; i < _commandBuffers.Length; i++)
+            //for (var i = 0; i < _commandBuffers.Length; i++)
+            //{
+            //    var beginInfo = new CommandBufferBeginInfo { SType = StructureType.CommandBufferBeginInfo };
+
+            //    if (_vk.BeginCommandBuffer(_commandBuffers[i], &beginInfo) != Result.Success)
+            //    {
+            //        throw new Exception("failed to begin recording command buffer!");
+            //    }
+
+
+            //    var renderPassInfo = new RenderPassBeginInfo
+            //    {
+            //        SType = StructureType.RenderPassBeginInfo,
+            //        RenderPass = _renderPass,
+            //        Framebuffer = _swapchainFramebuffers[i],
+            //        RenderArea = { Offset = new Offset2D { X = 0, Y = 0 }, Extent = _swapchainExtent }
+            //    };
+
+            //    var clearColor = new ClearValue
+            //    { Color = new ClearColorValue { Float32_0 = 0, Float32_1 = 0, Float32_2 = 0, Float32_3 = 1 } };
+            //    renderPassInfo.ClearValueCount = 1;
+            //    renderPassInfo.PClearValues = &clearColor;
+
+            //    _vk.CmdBeginRenderPass(_commandBuffers[i], &renderPassInfo, SubpassContents.Inline);
+
+            //    _vk.CmdBindPipeline(_commandBuffers[i], PipelineBindPoint.Graphics, _graphicsPipeline);
+
+            //    _vk.CmdBindVertexBuffers(_commandBuffers[i], 0, 1, _vertexBuffer, 0);
+
+            //    _vk.CmdBindDescriptorSets(_commandBuffers[i], PipelineBindPoint.Graphics, _pipelineLayout, 0, 1, descriptorSets[i], 0, null);
+
+            //    _vk.CmdDraw(_commandBuffers[i], (uint)_vertices.Length, 1, 0, 0);
+
+            //    _vk.CmdEndRenderPass(_commandBuffers[i]);
+
+            //    if (_vk.EndCommandBuffer(_commandBuffers[i]) != Result.Success)
+            //    {
+            //        throw new Exception("failed to record command buffer!");
+            //    }
+            //}
+        }
+        uint idx = 0;
+        private unsafe void RecordCommands(uint frameIdx)
+        {
+            _vk.ResetCommandBuffer(_commandBuffers[frameIdx], CommandBufferResetFlags.None);
+            var beginInfo = new CommandBufferBeginInfo { SType = StructureType.CommandBufferBeginInfo, Flags = 0 };
+
+            if (_vk.BeginCommandBuffer(_commandBuffers[frameIdx], &beginInfo) != Result.Success)
             {
-                var beginInfo = new CommandBufferBeginInfo { SType = StructureType.CommandBufferBeginInfo };
-
-                if (_vk.BeginCommandBuffer(_commandBuffers[i], &beginInfo) != Result.Success)
-                {
-                    throw new Exception("failed to begin recording command buffer!");
-                }
+                throw new Exception("failed to begin recording command buffer!");
+            }
 
 
-                var renderPassInfo = new RenderPassBeginInfo
-                {
-                    SType = StructureType.RenderPassBeginInfo,
-                    RenderPass = _renderPass,
-                    Framebuffer = _swapchainFramebuffers[i],
-                    RenderArea = { Offset = new Offset2D { X = 0, Y = 0 }, Extent = _swapchainExtent }
-                };
+            var renderPassInfo = new RenderPassBeginInfo
+            {
+                SType = StructureType.RenderPassBeginInfo,
+                RenderPass = _renderPass,
+                Framebuffer = _swapchainFramebuffers[frameIdx],
+                RenderArea = { Offset = new Offset2D { X = 0, Y = 0 }, Extent = _swapchainExtent }
+            };
+            var modelVar = new ModelVar { world = Matrix4x4.CreateRotationY((++idx) / 180f * (float)Math.PI) };
+            var clearColor = new ClearValue
+            { Color = new ClearColorValue { Float32_0 = 0, Float32_1 = 0, Float32_2 = 0, Float32_3 = 1 } };
+            renderPassInfo.ClearValueCount = 1;
+            renderPassInfo.PClearValues = &clearColor;
 
-                var clearColor = new ClearValue
-                { Color = new ClearColorValue { Float32_0 = 0, Float32_1 = 0, Float32_2 = 0, Float32_3 = 1 } };
-                renderPassInfo.ClearValueCount = 1;
-                renderPassInfo.PClearValues = &clearColor;
+            _vk.CmdBeginRenderPass(_commandBuffers[frameIdx], &renderPassInfo, SubpassContents.Inline);
 
-                _vk.CmdBeginRenderPass(_commandBuffers[i], &renderPassInfo, SubpassContents.Inline);
+            _vk.CmdBindPipeline(_commandBuffers[frameIdx], PipelineBindPoint.Graphics, _graphicsPipeline);
 
-                _vk.CmdBindPipeline(_commandBuffers[i], PipelineBindPoint.Graphics, _graphicsPipeline);
+            _vk.CmdBindVertexBuffers(_commandBuffers[frameIdx], 0, 1, _vertexBuffer, 0);
 
-                _vk.CmdBindVertexBuffers(_commandBuffers[i], 0, 1, _vertexBuffer, 0);
+            _vk.CmdBindDescriptorSets(_commandBuffers[frameIdx], PipelineBindPoint.Graphics, _pipelineLayout, 0, 1, descriptorSets[frameIdx], 0, null);
 
-                _vk.CmdBindDescriptorSets(_commandBuffers[i], PipelineBindPoint.Graphics, _pipelineLayout, 0, 1, descriptorSets[i], 0, null);
+            _vk.CmdPushConstants(_commandBuffers[frameIdx], _pipelineLayout, ShaderStageFlags.VertexBit, 0, (uint)sizeof(ModelVar), &modelVar);
 
-                _vk.CmdDraw(_commandBuffers[i], (uint)_vertices.Length, 1, 0, 0);
+            _vk.CmdDraw(_commandBuffers[frameIdx], (uint)_vertices.Length, 1, 0, 0);
 
-                _vk.CmdEndRenderPass(_commandBuffers[i]);
+            _vk.CmdEndRenderPass(_commandBuffers[frameIdx]);
 
-                if (_vk.EndCommandBuffer(_commandBuffers[i]) != Result.Success)
-                {
-                    throw new Exception("failed to record command buffer!");
-                }
+            if (_vk.EndCommandBuffer(_commandBuffers[frameIdx]) != Result.Success)
+            {
+                throw new Exception("failed to record command buffer!");
             }
         }
 
