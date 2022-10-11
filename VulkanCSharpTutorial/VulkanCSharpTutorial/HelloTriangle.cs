@@ -72,6 +72,11 @@ namespace VulkanCSharpTutorial
     {
         public Matrix4x4 world;
     }
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    unsafe struct MaterialVar
+    {
+        public Vector4 DiffuseColor;
+    }
 
     public class HelloTriangleApplication
     {
@@ -158,6 +163,8 @@ namespace VulkanCSharpTutorial
 
         static Buffer[] uniformBuffers;
         static DeviceMemory[] uniformBufferMemories;
+        static Buffer[] ubMaterial;
+        static DeviceMemory[] ubMaterialMemories;
         static DescriptorPool _descriptorPool;
         static DescriptorSet[] descriptorSets;
 
@@ -311,6 +318,12 @@ namespace VulkanCSharpTutorial
             _vk.MapMemory(_device, uniformBufferMemories[currentImage], 0, (uint)sizeof(GlobalVar), 0, ref data);
             NativeHelper.MemoryCopy((IntPtr)data, (IntPtr)(void*)&globalVar, (uint)sizeof(GlobalVar));
             _vk.UnmapMemory(_device, uniformBufferMemories[currentImage]);
+
+            var materialVar = new MaterialVar();
+            materialVar.DiffuseColor = new Vector4(0, 1f / MaxFramesInFlight * currentImage, 0, 1);
+            _vk.MapMemory(_device, ubMaterialMemories[currentImage], 0, (uint)sizeof(MaterialVar), 0, ref data);
+            NativeHelper.MemoryCopy((IntPtr)data, (IntPtr)(void*)&materialVar, (uint)sizeof(MaterialVar));
+            _vk.UnmapMemory(_device, ubMaterialMemories[currentImage]);
         }
 
         private unsafe void Cleanup()
@@ -996,24 +1009,38 @@ namespace VulkanCSharpTutorial
 
         unsafe void CreateDescriptorSetLayout()
         {
-            var uboLayoutBinding = new DescriptorSetLayoutBinding()
+            var uboLayoutBinding = new DescriptorSetLayoutBinding[]
             {
-                Binding = 0,
-                DescriptorType = DescriptorType.UniformBuffer,
-                DescriptorCount = 1,
-                StageFlags = ShaderStageFlags.VertexBit
-            };
-            var layoutInfo = new DescriptorSetLayoutCreateInfo()
-            {
-                SType = StructureType.DescriptorSetLayoutCreateInfo,
-                BindingCount = 1,
-                PBindings = &uboLayoutBinding
-            };
-            fixed(DescriptorSetLayout* pLayout = &_descriptorSetLayout)
-            {
-                if(_vk.CreateDescriptorSetLayout(_device, &layoutInfo, null, pLayout) != Result.Success)
+                new DescriptorSetLayoutBinding
                 {
-                    throw new Exception("Failed to create descriptor set layout.");
+                    Binding = 0,
+                    DescriptorType = DescriptorType.UniformBuffer,
+                    DescriptorCount = 1,
+                    StageFlags = ShaderStageFlags.VertexBit | ShaderStageFlags.FragmentBit
+                },
+                new DescriptorSetLayoutBinding
+                {
+                    Binding = 1,
+                    DescriptorType = DescriptorType.UniformBuffer,
+                    DescriptorCount = 1,
+                    StageFlags = ShaderStageFlags.FragmentBit
+                },
+            };
+
+            fixed (DescriptorSetLayoutBinding* pLayoutBinding = &uboLayoutBinding[0])
+            {
+                var layoutInfo = new DescriptorSetLayoutCreateInfo()
+                {
+                    SType = StructureType.DescriptorSetLayoutCreateInfo,
+                    BindingCount = 2,
+                    PBindings = pLayoutBinding
+                };
+                fixed(DescriptorSetLayout* pLayout = &_descriptorSetLayout)
+                {
+                    if(_vk.CreateDescriptorSetLayout(_device, &layoutInfo, null, pLayout) != Result.Success)
+                    {
+                        throw new Exception("Failed to create descriptor set layout.");
+                    }
                 }
             }
         }
@@ -1219,6 +1246,14 @@ namespace VulkanCSharpTutorial
                 CreateBuffer((ulong)bufferSize, BufferUsageFlags.UniformBufferBit, MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
                     ref uniformBuffers[i], ref uniformBufferMemories[i]);
             }
+
+            ubMaterial = new Buffer[MaxFramesInFlight];
+            ubMaterialMemories = new DeviceMemory[MaxFramesInFlight];
+            for (var i = 0; i < MaxFramesInFlight; ++i)
+            {
+                CreateBuffer((ulong)bufferSize, BufferUsageFlags.UniformBufferBit, MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
+                    ref ubMaterial[i], ref ubMaterialMemories[i]);
+            }
         }
 
         private unsafe void CreateDescriptorPool()
@@ -1226,7 +1261,7 @@ namespace VulkanCSharpTutorial
             var poolSize = new DescriptorPoolSize()
             {
                 Type = DescriptorType.UniformBuffer,
-                DescriptorCount = MaxFramesInFlight
+                DescriptorCount = MaxFramesInFlight * 2
             };
             var poolInfo = new DescriptorPoolCreateInfo()
             {
@@ -1263,7 +1298,8 @@ namespace VulkanCSharpTutorial
                         DescriptorSetCount = MaxFramesInFlight,
                         PSetLayouts = pLayouts
                     };
-                    if(_vk.AllocateDescriptorSets(_device, &info, pSet) != Result.Success)
+                    var ret = _vk.AllocateDescriptorSets(_device, &info, pSet);
+                    if (ret != Result.Success)
                     {
                         throw new Exception("Failed to allocate descriptor sets.");
                     }
@@ -1271,21 +1307,48 @@ namespace VulkanCSharpTutorial
             }
             for(var i = 0; i <MaxFramesInFlight; ++i)
             {
-                var bufferInfo = new DescriptorBufferInfo { 
-                    Buffer = uniformBuffers[i], 
-                    Range = (ulong)sizeof(GlobalVar) 
+                var bufferInfo = new DescriptorBufferInfo[] { 
+                    new DescriptorBufferInfo
+                    {
+                        Buffer = uniformBuffers[i], 
+                        Range = (ulong)sizeof(GlobalVar) 
+                    }
                 };
-                var descriptorWrite = new WriteDescriptorSet
+                fixed(DescriptorBufferInfo* pBufferInfo = &bufferInfo[0])
                 {
-                    SType = StructureType.WriteDescriptorSet,
-                    DstSet = descriptorSets[i],
-                    DstBinding = 0,
-                    DstArrayElement = 0,
-                    DescriptorType = DescriptorType.UniformBuffer,
-                    DescriptorCount = 1,
-                    PBufferInfo = &bufferInfo,
+                    var descriptorWrite = new WriteDescriptorSet
+                    {
+                        SType = StructureType.WriteDescriptorSet,
+                        DstSet = descriptorSets[i],
+                        DstBinding = 0,
+                        DstArrayElement = 0,
+                        DescriptorType = DescriptorType.UniformBuffer,
+                        DescriptorCount = 1,
+                        PBufferInfo = pBufferInfo,
+                    };
+                    _vk.UpdateDescriptorSets(_device, 1, &descriptorWrite, 0, null);
+                }
+                bufferInfo = new DescriptorBufferInfo[] {
+                    new DescriptorBufferInfo
+                    {
+                        Buffer = ubMaterial[i],
+                        Range = (ulong)sizeof(MaterialVar)
+                    },
                 };
-                _vk.UpdateDescriptorSets(_device, 1, &descriptorWrite, 0, null);
+                fixed (DescriptorBufferInfo* pBufferInfo = &bufferInfo[0])
+                {
+                    var descriptorWrite = new WriteDescriptorSet
+                    {
+                        SType = StructureType.WriteDescriptorSet,
+                        DstSet = descriptorSets[i],
+                        DstBinding = 1,
+                        DstArrayElement = 0,
+                        DescriptorType = DescriptorType.UniformBuffer,
+                        DescriptorCount = 1,
+                        PBufferInfo = pBufferInfo,
+                    };
+                    _vk.UpdateDescriptorSets(_device, 1, &descriptorWrite, 0, null);
+                }
             }
         }
 
